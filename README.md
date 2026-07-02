@@ -1,0 +1,3 @@
+# run_tracker_central_on_esp32
+
+Seeed Studio XIAO MG24 Senceを搭載したペリフェラルデバイスと通信するFlutter製セントラルデバイス用アプリ
