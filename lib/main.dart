@@ -18,9 +18,9 @@ void main() async {
   // ペリフェラルデバイスとの通信をバックグラウンドで開始
   WidgetsBinding.instance.addPostFrameCallback((_) async{
     // 時計を同期
-    bleManager.startScan();
+    bleManager.rtcSync();
     // JSONを同期
-    await bleManager.startBleProcess();
+    await bleManager.getJson();
   });
 
   runApp(MyApp());

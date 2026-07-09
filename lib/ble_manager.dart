@@ -27,34 +27,27 @@ class BleManager {
   
   final Uuid serviceUuid = Uuid.parse("930788e7-5e3d-7c7d-65ff-2461a6023d44");
   final Uuid rtcUuid = Uuid.parse("9cd2702a-656d-539a-d060-c341a485a861");
-  final Uuid jsonUuid = Uuid.parse("930788e7-5e3d-7c7d-65ff-2461a6023d44");
+  final Uuid jsonUuid = Uuid.parse("f447c752-5b63-3cb9-d388-b305e02c19f3");
 
-
-  Future<void> startBleProcess() async {
-    await Future.delayed(
-      Duration(seconds:1)
-    );
-    await startGetJson();
-  }
 
   // =============================================
   // RTC同期
   // =============================================
 
-  void startScan() {
+  void rtcSync() {
     scanSubscription = ble.scanForDevices(
         withServices:[serviceUuid],
         scanMode: ScanMode.lowLatency,
       ).listen(
         (device){
-          connectAndSync(device);
+          startRtcSync(device);
         }, onError:(e){
           print(e);
         }
       );
   }
 
-  Future<void> connectAndSync(DiscoveredDevice device) async {
+  Future<void> startRtcSync(DiscoveredDevice device) async {
     scanSubscription = ble.connectToDevice(id: device.id,)
       .listen((state){
           print(state.connectionState);
@@ -93,7 +86,14 @@ class BleManager {
 // =============================================
 // JSON同期
 // =============================================
-  Future<void> startGetJson() async{
+  Future<void> getJson() async {
+    await Future.delayed(
+      Duration(seconds:1)
+    );
+    await startSubscribe();
+  }
+
+  Future<void> startSubscribe() async{
   connecting = false;
   connectionSubscription = ble.scanForDevices(
       withServices:[serviceUuid],
@@ -103,26 +103,25 @@ class BleManager {
         if (connecting) return;
         connecting = true;
         scanSubscription?.cancel();
-        connectAndGetJson(device);
+        startGetJson(device);
       }, onError:(e){
         print(e);
       }
     );
 }
 
-Future<void> connectAndGetJson(DiscoveredDevice device) async {
+Future<void> startGetJson(DiscoveredDevice device) async {
   print("connect start ${device.id}");
   connectionSubscription = ble.connectToDevice(id: device.id,)
     .listen((state){
         if(state.connectionState == DeviceConnectionState.connected){
-            requestJson(device.id);
+            sendRequestJson(device.id);
         }
       }
     );
 }
 
-Future<void> requestJson(String deviceId) async {
-
+Future<void> sendRequestJson(String deviceId) async {
     // JSONを受信
     final jsonCharacteristic =
       QualifiedCharacteristic(
