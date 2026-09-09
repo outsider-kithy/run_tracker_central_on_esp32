@@ -4,7 +4,7 @@ import 'Database.dart';
 import 'LatestLogPage.dart';
 import 'PastLogPage.dart';
 import 'AnalyticsPage.dart';
-import 'bleManager.dart';
+import 'BleManager.dart';
 
 final bleManager = BleManager();
 
