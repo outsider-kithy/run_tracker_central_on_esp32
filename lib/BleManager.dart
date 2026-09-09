@@ -25,9 +25,10 @@ class BleManager {
 
   final FlutterReactiveBle ble = FlutterReactiveBle();
   
-  final Uuid serviceUuid = Uuid.parse("930788e7-5e3d-7c7d-65ff-2461a6023d44");
-  final Uuid rtcUuid = Uuid.parse("9cd2702a-656d-539a-d060-c341a485a861");
+  final Uuid myServiceUuid = Uuid.parse("930788e7-5e3d-7c7d-65ff-2461a6023d44");
+  final Uuid timeSyncUuid = Uuid.parse("9cd2702a-656d-539a-d060-c341a485a861");
   final Uuid jsonUuid = Uuid.parse("f447c752-5b63-3cb9-d388-b305e02c19f3");
+  final Uuid deleteUuid = Uuid.parse("528fe50b-7898-66dd-9a41-372fe61744fd");
 
 
   // =============================================
@@ -35,8 +36,9 @@ class BleManager {
   // =============================================
 
   void rtcSync() {
+    
     scanSubscription = ble.scanForDevices(
-        withServices:[serviceUuid],
+        withServices:[myServiceUuid],
         scanMode: ScanMode.lowLatency,
       ).listen(
         (device){
@@ -52,7 +54,7 @@ class BleManager {
       .listen((state){
           print(state.connectionState);
           if(state.connectionState == DeviceConnectionState.connected){
-            //  discoverCharacteristics(device.id);
+             discoverCharacteristics(device.id);
              sendRtcSync(device.id);
           }
         }
@@ -70,8 +72,8 @@ class BleManager {
     ];
 
     final characteristic = QualifiedCharacteristic(
-      serviceId: serviceUuid,
-      characteristicId: rtcUuid,
+      serviceId: myServiceUuid,
+      characteristicId: timeSyncUuid,
       deviceId: deviceId,
     );
 
@@ -96,7 +98,7 @@ class BleManager {
   Future<void> startSubscribe() async{
   connecting = false;
   connectionSubscription = ble.scanForDevices(
-      withServices:[serviceUuid],
+      withServices:[myServiceUuid],
       scanMode: ScanMode.lowLatency,
     ).listen(
       (device){
@@ -125,7 +127,7 @@ Future<void> sendRequestJson(String deviceId) async {
     // JSONを受信
     final jsonCharacteristic =
       QualifiedCharacteristic(
-        serviceId: serviceUuid,
+        serviceId: myServiceUuid,
         characteristicId: jsonUuid ,
         deviceId: deviceId,
     );
@@ -199,7 +201,7 @@ Future<void> sendRequestJson(String deviceId) async {
         try {
           final jsonMap = jsonDecode(jsonString) as Map<String, dynamic>;
 
-          // 🔥 Map → RunningData に変換
+          // Map → RunningData に変換
           final runningData = RunningData.fromJson(jsonMap);
           print(jsonMap);
           jsonsList.add(runningData);
@@ -238,6 +240,54 @@ Future<void> sendRequestJson(String deviceId) async {
     }
     print("Recieved JSON:");
     print(textBuffer);
+
+    // JSON削除コマンドを送信
+    jsonDelete();
   }
 }
+
+// =============================================
+// JSON削除
+// =============================================
+  void jsonDelete() {
+    
+    scanSubscription = ble.scanForDevices(
+        withServices:[myServiceUuid],
+        scanMode: ScanMode.lowLatency,
+      ).listen(
+        (device){
+          startSendJsonDeleteCommand(device);
+        }, onError:(e){
+          print(e);
+        }
+      );
+  }
+
+  Future<void> startSendJsonDeleteCommand(DiscoveredDevice device) async {
+    scanSubscription = ble.connectToDevice(id: device.id,)
+      .listen((state){
+          print(state.connectionState);
+          if(state.connectionState == DeviceConnectionState.connected){
+             discoverCharacteristics(device.id);
+             sendJsonDeleteCommand(device.id);
+          }
+        }
+      );
+  }
+
+  // JSON削除コマンドをペリフェラルに送信
+  Future<void> sendJsonDeleteCommand(String deviceId) async {
+    
+    final characteristic = QualifiedCharacteristic(
+      serviceId: myServiceUuid,
+      characteristicId: deleteUuid,
+      deviceId: deviceId,
+    );
+
+    await ble.writeCharacteristicWithResponse(
+        characteristic,
+        value: utf8.encode("DELETE"),
+    );
+    print("DELETEコマンド送信完了");
+  }
 }
