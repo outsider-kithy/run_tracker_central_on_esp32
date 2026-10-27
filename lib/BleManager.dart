@@ -30,6 +30,8 @@ class BleManager {
   final Uuid jsonUuid = Uuid.parse("f447c752-5b63-3cb9-d388-b305e02c19f3");
   final Uuid deleteUuid = Uuid.parse("528fe50b-7898-66dd-9a41-372fe61744fd");
 
+  late QualifiedCharacteristic jsonCharacteristic;
+  late QualifiedCharacteristic deleteCharacteristic;
 
   // =============================================
   // RTC同期
@@ -61,7 +63,7 @@ class BleManager {
       );
   }
 
-  // RTC同期のコマンドと現在時刻をペリフェラルに送信
+  // 現在時刻のUNIXタイムスタンプをペリフェラルに送信
   Future<void> sendRtcSync(String deviceId) async {
     final epoch = DateTime.now().millisecondsSinceEpoch ~/1000;
     final bytes=[
@@ -81,7 +83,7 @@ class BleManager {
         characteristic,
         value: bytes,
     );
-    print("RTC_SYNCコマンド送信完了 : $epoch");
+    print("タイムスタンプ送信完了 : $epoch");
   }
 
   
@@ -89,9 +91,6 @@ class BleManager {
 // JSON同期
 // =============================================
   Future<void> getJson() async {
-    await Future.delayed(
-      Duration(seconds:1)
-    );
     await startSubscribe();
   }
 
@@ -124,16 +123,20 @@ Future<void> startGetJson(DiscoveredDevice device) async {
 }
 
 Future<void> sendRequestJson(String deviceId) async {
+    print('サブスクライブの準備中・・・');
+
     // JSONを受信
-    final jsonCharacteristic =
+    jsonCharacteristic =
       QualifiedCharacteristic(
         serviceId: myServiceUuid,
         characteristicId: jsonUuid ,
-        deviceId: deviceId,
+        deviceId: deviceId
     );
 
+
     notifySubscription = ble.subscribeToCharacteristic(jsonCharacteristic).listen((data) async{
-        connectionSubscription?.cancel();
+        print("JSON受信中...");
+        //print(data);
 
         final chunk = utf8.decode(data, allowMalformed: true);
      
@@ -143,7 +146,7 @@ Future<void> sendRequestJson(String deviceId) async {
         print(textBuffer.length);
 
         // ② JSON抽出処理
-        extractJsonsFromBuffer(textBuffer);
+        await extractJsonsFromBuffer(deviceId);
 
       },
       onError: (Object e) {
@@ -162,7 +165,6 @@ Future<void> sendRequestJson(String deviceId) async {
     } catch (e) {
       print('GET_JSON送信失敗 $e');
     }
-
   }
 
   // キャラクタリステックスUUIDを確認
@@ -179,7 +181,7 @@ Future<void> sendRequestJson(String deviceId) async {
   }
 
   //JSON抽出関数
-  void extractJsonsFromBuffer(textBuffer) async{
+  Future<void> extractJsonsFromBuffer(String deviceId) async {
   int braceCount = 0;
   int jsonStart = -1;
 
@@ -187,34 +189,37 @@ Future<void> sendRequestJson(String deviceId) async {
 
     if (textBuffer[i] == '{') {
       if (braceCount == 0) {
-        jsonStart = i; // JSON開始位置
+        jsonStart = i;
       }
       braceCount++;
-    } 
+    }
     else if (textBuffer[i] == '}') {
       braceCount--;
 
       // JSON完成
       if (braceCount == 0 && jsonStart != -1) {
+
         final jsonString = textBuffer.substring(jsonStart, i + 1);
 
         try {
           final jsonMap = jsonDecode(jsonString) as Map<String, dynamic>;
-
-          // Map → RunningData に変換
           final runningData = RunningData.fromJson(jsonMap);
           print(jsonMap);
           jsonsList.add(runningData);
 
-          // データベースに登録
-          final pointsJson = jsonEncode(runningData.points.map((p) => p.toJson()).toList());
-          //ペースを計算
-          final pace = (runningData.distance > 0)
-              ? truncateToDecimelPlaces(runningData.elapsedSeconds / 60 / runningData.distance, 2) * 10.0
-              : 0.0;
-          //距離を計算
-          final double kmDistance = runningData.distance * 0.001;
+          final pointsJson = jsonEncode(
+            runningData.points
+                .map((p) => p.toJson())
+                .toList()
+          );
 
+           //ペースを計算
+          final pace = (runningData.distance > 0)
+              ? truncateToDecimelPlaces(runningData.distance / (runningData.elapsedSeconds / 60), 2)
+              : 0.0;
+          final double kmDistance =runningData.distance * 0.001;
+
+          // DB保存
           await DatabaseHelper().insertRunningData(
             pointsJson,
             kmDistance,
@@ -226,68 +231,39 @@ Future<void> sendRequestJson(String deviceId) async {
             runningData.temp,
             runningData.avgBpm
           );
+
           print("データベースに登録完了");
-      
+
+          // DB保存成功後にDELETE
+          await sendDelete(deviceId);
         } catch (e) {
-          print("JSON解析エラー: $e");
+          print("JSON解析またはDB登録エラー: $e");
+          // エラー時はDELETEしない
+          return;
         }
-
-        // 取り出した部分をバッファから削除
+        // 処理済みJSONをバッファから削除
         textBuffer = textBuffer.substring(i + 1);
-
         return;
       }
     }
-    print("Recieved JSON:");
-    print(textBuffer);
-
-    // JSON削除コマンドを送信
-    jsonDelete();
   }
 }
 
-// =============================================
-// JSON削除
-// =============================================
-  void jsonDelete() {
-    
-    scanSubscription = ble.scanForDevices(
-        withServices:[myServiceUuid],
-        scanMode: ScanMode.lowLatency,
-      ).listen(
-        (device){
-          startSendJsonDeleteCommand(device);
-        }, onError:(e){
-          print(e);
-        }
-      );
-  }
-
-  Future<void> startSendJsonDeleteCommand(DiscoveredDevice device) async {
-    scanSubscription = ble.connectToDevice(id: device.id,)
-      .listen((state){
-          print(state.connectionState);
-          if(state.connectionState == DeviceConnectionState.connected){
-             discoverCharacteristics(device.id);
-             sendJsonDeleteCommand(device.id);
-          }
-        }
-      );
-  }
-
-  // JSON削除コマンドをペリフェラルに送信
-  Future<void> sendJsonDeleteCommand(String deviceId) async {
-    
-    final characteristic = QualifiedCharacteristic(
-      serviceId: myServiceUuid,
-      characteristicId: deleteUuid,
-      deviceId: deviceId,
-    );
-
+Future<void> sendDelete(String deviceId) async {
+  deleteCharacteristic = QualifiedCharacteristic(
+    serviceId: myServiceUuid,
+    characteristicId: deleteUuid,
+    deviceId: deviceId,
+  );
+  try {
     await ble.writeCharacteristicWithResponse(
-        characteristic,
-        value: utf8.encode("DELETE"),
+      deleteCharacteristic,
+      value: utf8.encode("DELETE"),
     );
     print("DELETEコマンド送信完了");
+  } catch (e) {
+    print("DELETE送信失敗: $e");
+
   }
+}
 }

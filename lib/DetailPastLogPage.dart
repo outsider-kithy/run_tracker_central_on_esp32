@@ -105,7 +105,7 @@ class _DetailPastLogPageState extends State<DetailPastLogPage> {
                   ),
                   InfoCard(
                     title: "ペース",
-                    value: "${(widget.pace * 100.0).toStringAsFixed(2)} 分/km",
+                    value: "${(widget.pace * 100.0).toStringAsFixed(2)} km/分",
                     icon: Icons.local_fire_department,
                     color: Colors.red,
                   ),
